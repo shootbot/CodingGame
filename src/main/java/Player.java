@@ -3,36 +3,40 @@
 import java.util.*;
 
 class Player {
-    static Map<Integer, CreatureCard> creatures = new HashMap<>();
+    static Map<Integer, Card> creatures = new HashMap<>();
     static Random rng = new Random();
     static int myHealth;
     static int oppHealth;
-    static List<CreatureCard> units = new ArrayList<>();
-    static List<CreatureCard> hand = new ArrayList<>();
-    static List<CreatureCard> enemies = new ArrayList<>();
+    static List<Card> units = new ArrayList<>();
+    static List<Card> hand = new ArrayList<>();
+    static List<Card> enemies = new ArrayList<>();
     static Scanner in;
     static String missions = "";
     static int myMana;
     static Map<Integer, Integer> manaCurve = new HashMap<>();
+    static int pickCount = 0;
+    static int dgCount = 0; // drainer or guardian count
     
     public static void main(String args[]) {
         
         init();
         
-        int count = 0;
         while (true) {
             clear();
             readState();
             
-            if (count < 30) {
+            if (pickCount < 30) {
                 int choice = getBestCard(hand);
-                CreatureCard c = hand.get(choice);
+                Card c = hand.get(choice);
                 updateManacurve(c);
+                if (c.drain || c.guard) {
+                    dgCount++;
+                }
                 
-                System.err.println("Draft: " + hand.get(0) + hand.get(1) + hand.get(2));
-                System.err.println("Choice: " + choice + " " + c.getEffic());
-                System.out.println("PICK " + choice);
-                count++;
+                debug("Draft: " + hand.get(0) + hand.get(1) + hand.get(2));
+                debug("Choice: " + choice + " " + c.getEffic());
+                sendPick(choice);
+                pickCount++;
             } else {
                 makeBattleMove();
             }
@@ -40,10 +44,14 @@ class Player {
         
     }
     
-    private static void updateManacurve(CreatureCard c) {
+    private static void sendPick(int choice) {
+        System.out.println("PICK " + choice);
+    }
+    
+    private static void updateManacurve(Card c) {
         int cost = c.cost;
-        if (cost > 7) {
-            cost = 7;
+        if (cost > 6) {
+            cost = 6;
         }
         manaCurve.put(cost, manaCurve.get(cost) + 1);
     }
@@ -79,7 +87,7 @@ class Player {
     
     private static void useItems() {
         debug("useItems myMana=" + myMana);
-        for (CreatureCard c : hand) {
+        for (Card c : hand) {
             debug(c.toString());
             if (myMana < c.cost) continue;
             if (c.cardType == 1) {
@@ -114,7 +122,8 @@ class Player {
     }
     
     private static void playDefense() {
-        for (CreatureCard c : units) {
+        for (Card c : units) {
+            if (c.attack <= 0 || (c.guard && !c.charge)) continue;
             int randomTarget = rng.nextInt(enemies.size());
             missions += "ATTACK " + c.instanceId + " " + enemies.get(randomTarget).instanceId + ";";
         }
@@ -123,11 +132,11 @@ class Player {
     
     private static boolean isWinningRace() {
         int myPower = 0;
-        for (CreatureCard c : units) {
+        for (Card c : units) {
             myPower += c.attack;
         }
         int oppPower = 0;
-        for (CreatureCard c : enemies) {
+        for (Card c : enemies) {
             oppPower += c.attack;
         }
         int oppTurns = (int) Math.ceil((double) myHealth / oppPower);
@@ -141,7 +150,7 @@ class Player {
     
     private static boolean canKillOpponent() {
         int sumPower = 0;
-        for (CreatureCard c : units) {
+        for (Card c : units) {
             sumPower += c.attack;
         }
         return oppHealth <= sumPower;
@@ -150,13 +159,13 @@ class Player {
     private static void killGuards() {
         while (hasGuards()) {
             int guardId = getGuardEnemy(enemies);
-            CreatureCard guard = getById(guardId);
+            Card guard = getById(guardId);
             int gDefense = guard.defense;
             
             if (units.size() == 0) break;
             
-            List<CreatureCard> toRemove = new ArrayList<>();
-            for (CreatureCard c : units) {
+            List<Card> toRemove = new ArrayList<>();
+            for (Card c : units) {
                 if (gDefense > 0) {
                     if (c.attack != 0) {
                         missions += "ATTACK " + c.instanceId + " " + guardId + ";";
@@ -188,13 +197,13 @@ class Player {
         } else {
             while (hasDrainers()) {
                 int drainerId = getDrainEnemy(enemies);
-                CreatureCard drainer = getById(drainerId);
+                Card drainer = getById(drainerId);
                 int dDefense = drainer.defense;
                 
                 if (units.size() == 0) break;
                 
-                List<CreatureCard> toRemove = new ArrayList<>();
-                for (CreatureCard c : units) {
+                List<Card> toRemove = new ArrayList<>();
+                for (Card c : units) {
                     if (dDefense > 0) {
                         if (c.attack != 0) {
                             missions += "ATTACK " + c.instanceId + " " + drainerId + ";";
@@ -217,9 +226,56 @@ class Player {
         }
     }
     
-    private static void remove(List<CreatureCard> list, int id) {
+    private static List<Move> genMoves() {
+        List<Move> res = new ArrayList<>();
+        
+        for (Card c : units) {
+            for (Card e: enemies) {
+                res.add(new Move(c.instanceId, e.instanceId));
+            }
+        }
+        
+        return res;
+    }
+    
+    private static Move getMaxMove(List<Move> s) {
+        int ev = 0;
+        for (Move m : s) {
+            ev += getMoveValue(m);
+        }
+        
+        
+        return null;
+    }
+    
+    private static int getMoveValue(Move m) {
+        Card att = getById(m.attackerId);
+        Card def = getById(m.defenderId);
+        int BOUNTY = 1;
+        int ev = 0;
+        
+        if (att.attack >= def.defense) {
+            ev += def.attack + def.defense + BOUNTY;
+        } else {
+            ev += att.attack;
+        }
+        
+        if (def.attack >= att.defense) {
+            ev -= att.attack + att.defense + BOUNTY;
+        } else {
+            ev -= def.attack;
+        }
+        
+        if (att.drain) {
+            ev += att.attack / 2;
+        }
+        
+        return ev;
+    }
+    
+    private static void remove(List<Card> list, int id) {
         for (int i = 0; i < list.size(); i++) {
-            CreatureCard c = list.get(i);
+            Card c = list.get(i);
             if (c.instanceId == id) {
                 list.remove(i);
                 break;
@@ -228,7 +284,7 @@ class Player {
     }
     
     private static void killOpponent() {
-        for (CreatureCard c : units) {
+        for (Card c : units) {
             missions += "ATTACK " + c.instanceId + " -1;";
         }
         units.clear();
@@ -243,10 +299,10 @@ class Player {
     }
     
     private static void summonCreatures() {
-        List<CreatureCard> toRemove = new ArrayList<>();
+        List<Card> toRemove = new ArrayList<>();
         hand.sort((o1, o2) -> o1.cost > o2.cost ? -1 : 1);
         if (!isWinningRace()) {
-            for (CreatureCard c : hand) {
+            for (Card c : hand) {
                 if (myMana < 0) break;
                 
                 if (c.charge || c.guard) {
@@ -263,7 +319,7 @@ class Player {
         }
         hand.removeAll(toRemove);
         toRemove.clear();
-        for (CreatureCard c : hand) {
+        for (Card c : hand) {
             if (myMana < 0) break;
             
             missions += "SUMMON " + c.instanceId + ";";
@@ -306,6 +362,7 @@ class Player {
         }
         for (int i = 0; i < opponentActions; i++) {
             String cardNumberAndAction = in.nextLine();
+            debug("opp: " + cardNumberAndAction);
         }
         
         int cardCount = in.nextInt();
@@ -322,7 +379,7 @@ class Player {
             int opponentHealthChange = in.nextInt();
             int cardDraw = in.nextInt();
             
-            CreatureCard c = new CreatureCard(
+            Card c = new Card(
                     attack,
                     defense,
                     cost,
@@ -348,12 +405,12 @@ class Player {
     }
     
     
-    private static CreatureCard getById(int instanceId) {
+    private static Card getById(int instanceId) {
         return creatures.get(instanceId);
     }
     
-    private static int getGuardEnemy(List<CreatureCard> enemies) {
-        for (CreatureCard c : enemies) {
+    private static int getGuardEnemy(List<Card> enemies) {
+        for (Card c : enemies) {
             if (c.guard) {
                 return c.instanceId;
             }
@@ -361,8 +418,8 @@ class Player {
         return -1;
     }
     
-    private static int getDrainEnemy(List<CreatureCard> enemies) {
-        for (CreatureCard c : enemies) {
+    private static int getDrainEnemy(List<Card> enemies) {
+        for (Card c : enemies) {
             if (c.drain) {
                 return c.instanceId;
             }
@@ -370,12 +427,12 @@ class Player {
         return -1;
     }
     
-    private static int getBestFit(int enemyId, List<CreatureCard> units) {
+    private static int getBestFit(int enemyId, List<Card> units) {
         if (enemyId == -1) return -1;
         
-        List<CreatureCard> list = new ArrayList<>();
+        List<Card> list = new ArrayList<>();
         
-        for (CreatureCard c : units) {
+        for (Card c : units) {
             if (c.attack == getById(enemyId).defense) {
                 list.add(c);
             }
@@ -384,10 +441,10 @@ class Player {
             return -1;
         }
         
-        CreatureCard min = list.get(0);
+        Card min = list.get(0);
         int minId = min.instanceId;
         for (int i = 0; i < list.size(); i++) {
-            CreatureCard c = list.get(i);
+            Card c = list.get(i);
             if (c.defense < min.defense) {
                 min = c;
                 minId = c.instanceId;
@@ -397,10 +454,10 @@ class Player {
         return minId;
     }
     
-    static int getBestCard(List<CreatureCard> list) {
-        CreatureCard c0 = list.get(0);
-        CreatureCard c1 = list.get(1);
-        CreatureCard c2 = list.get(2);
+    static int getBestCard(List<Card> list) {
+        Card c0 = list.get(0);
+        Card c1 = list.get(1);
+        Card c2 = list.get(2);
         
         if (c0.compareTo(c1) >= 0 && c0.compareTo(c2) >= 0) return 0;
         if (c1.compareTo(c2) >= 0 && c1.compareTo(c0) >= 0) return 1;
@@ -412,7 +469,7 @@ class Player {
     }
 }
 
-class CreatureCard implements Comparable {
+class Card implements Comparable {
     int attack;
     int defense;
     int cost;
@@ -431,7 +488,7 @@ class CreatureCard implements Comparable {
     
     double getEffic() {
         double res = 0;
-        if (cardType != 0) res += 3;
+        if (cardType != 0) res += -303;
         if (cost == 0) res -= 500;
         
         res += ((double)
@@ -448,17 +505,26 @@ class CreatureCard implements Comparable {
                 + (ward ? (guard ? attack : 1) : 0)
         ) / (cost < 3 ? cost + 1 : cost);
         
-        if (cost >= 7 && Player.manaCurve.get(7) >= 4) {
+        if (cost >= 6 && Player.manaCurve.get(6) >= 4) {
             res -= 0.5;
         }
-        if (cost <= 3 && Player.manaCurve.get(7) >= 7) {
+        if (cost <= 3 && Player.manaCurve.get(6) >= 7) {
             res += 1;
         }
+
+//        if ((double) Player.dgCount / Player.pickCount > 0.5) {
+//            if (drain || guard) {
+//                res += 1;
+//            }
+//            if (cardType == 1) {
+//                res = (Math.sqrt(attack * defense) + cardDraw) / cost;
+//            }
+//        }
         
         return res;
     }
     
-    public CreatureCard(
+    public Card(
             int attack,
             int defense,
             int cost,
@@ -488,7 +554,7 @@ class CreatureCard implements Comparable {
     }
     
     public int compareTo(Object o) {
-        CreatureCard other = (CreatureCard) o;
+        Card other = (Card) o;
         return Double.compare(getEffic(), other.getEffic());
     }
     
@@ -507,7 +573,7 @@ class CreatureCard implements Comparable {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        CreatureCard that = (CreatureCard) o;
+        Card that = (Card) o;
         return instanceId == that.instanceId;
     }
     
@@ -517,3 +583,12 @@ class CreatureCard implements Comparable {
     }
 }
 
+class Move {
+    int attackerId;
+    int defenderId;
+    
+    public Move(int attackerId, int defenderId) {
+        this.attackerId = attackerId;
+        this.defenderId = defenderId;
+    }
+}
