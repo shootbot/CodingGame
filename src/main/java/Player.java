@@ -86,12 +86,9 @@ class Player {
     }
     
     private static void useItems() {
-        debug("useItems myMana=" + myMana);
         for (Card c : hand) {
-            debug(c.toString());
             if (myMana < c.cost) continue;
             if (c.cardType == 1) {
-                
                 if (units.size() == 0) continue;
                 int unit;
                 if (getDrainEnemy(units) >= 0) {
@@ -101,33 +98,36 @@ class Player {
                     unit = units.get(random).instanceId;
                 }
                 missions += "USE " + c.instanceId + " " + unit + ";";
-                debug("USE " + c.instanceId + " " + unit);
             }
             if (c.cardType == 2) {
-                
                 if (enemies.size() > 0) {
                     enemies.sort((o1, o2) -> {
-//                            return o1.cost + o1.defense > o2.cost + o2.defense ? -1 : 1;
                         return o1.drain ? -1 : 1;
                     });
                     missions += "USE " + c.instanceId + " " + enemies.get(0).instanceId + ";";
-                    debug("USE " + c.instanceId + " " + enemies.get(0).instanceId);
                 }
             }
             if (c.cardType == 3) {
                 missions += "USE " + c.instanceId + " -1;";
-                debug("USE " + c.instanceId + " -1");
             }
         }
     }
     
     private static void playDefense() {
         for (Card c : units) {
-            if (c.attack <= 0 || (c.guard && !c.charge)) continue;
-            int randomTarget = rng.nextInt(enemies.size());
-            missions += "ATTACK " + c.instanceId + " " + enemies.get(randomTarget).instanceId + ";";
+            if (c.attack <= 0) continue;
+            if (c.guard) {
+                attack(c.instanceId, -1);
+            } else {
+                int randomTarget = rng.nextInt(enemies.size());
+                attack(c.instanceId, enemies.get(randomTarget).instanceId);
+            }
         }
         units.clear();
+    }
+    
+    private static void attack(int attackerId, int defenderId) {
+        missions += "ATTACK " + attackerId + " " + defenderId + ";";
     }
     
     private static boolean isWinningRace() {
@@ -226,52 +226,7 @@ class Player {
         }
     }
     
-    private static List<Move> genMoves() {
-        List<Move> res = new ArrayList<>();
-        
-        for (Card c : units) {
-            for (Card e: enemies) {
-                res.add(new Move(c.instanceId, e.instanceId));
-            }
-        }
-        
-        return res;
-    }
     
-    private static Move getMaxMove(List<Move> s) {
-        int ev = 0;
-        for (Move m : s) {
-            ev += getMoveValue(m);
-        }
-        
-        
-        return null;
-    }
-    
-    private static int getMoveValue(Move m) {
-        Card att = getById(m.attackerId);
-        Card def = getById(m.defenderId);
-        int BOUNTY = 1;
-        int ev = 0;
-        
-        if (att.attack >= def.defense) {
-            ev += def.attack + def.defense + BOUNTY;
-        } else {
-            ev += att.attack;
-        }
-        
-        if (def.attack >= att.defense) {
-            ev -= att.attack + att.defense + BOUNTY;
-        } else {
-            ev -= def.attack;
-        }
-        
-        if (att.drain) {
-            ev += att.attack / 2;
-        }
-        
-        return ev;
-    }
     
     private static void remove(List<Card> list, int id) {
         for (int i = 0; i < list.size(); i++) {
@@ -304,6 +259,7 @@ class Player {
         if (!isWinningRace()) {
             for (Card c : hand) {
                 if (myMana < 0) break;
+                if (c.cardType != 0) continue;
                 
                 if (c.charge || c.guard) {
                     missions += "SUMMON " + c.instanceId + ";";
@@ -321,6 +277,7 @@ class Player {
         toRemove.clear();
         for (Card c : hand) {
             if (myMana < 0) break;
+            if (c.cardType != 0) continue;
             
             missions += "SUMMON " + c.instanceId + ";";
             if (myMana >= c.cost) {
@@ -524,6 +481,30 @@ class Card implements Comparable {
         return res;
     }
     
+    public Card(Card orig) {
+        this.attack = orig.attack;
+        this.defense = orig.defense;
+        this.cost = orig.cost;
+        this.instanceId = orig.instanceId;
+        this.myHealthChange = orig.myHealthChange;
+        this.opponentHealthChange = orig.opponentHealthChange;
+        this.cardDraw = orig.cardDraw;
+        this.guard = orig.guard;
+        this.breakthrough = orig.breakthrough;
+        this.charge = orig.charge;
+        this.lethal = orig.lethal;
+        this.drain = orig.drain;
+        this.ward = orig.ward;
+        this.cardType = orig.cardType;
+        this.cardNumber = orig.cardNumber;
+    }
+    
+    public Card(int instanceId, int attack, int defense) {
+        this.instanceId = instanceId;
+        this.attack = attack;
+        this.defense = defense;
+    }
+    
     public Card(
             int attack,
             int defense,
@@ -545,10 +526,10 @@ class Card implements Comparable {
         this.cardType = cardType;
         this.cardNumber = cardNumber;
         
-        guard = abilities.contains("G");
         breakthrough = abilities.contains("B");
         charge = abilities.contains("C");
         drain = abilities.contains("D");
+        guard = abilities.contains("G");
         lethal = abilities.contains("L");
         ward = abilities.contains("W");
     }
